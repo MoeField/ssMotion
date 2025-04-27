@@ -16,7 +16,7 @@ from dataTypes.ptData import get_ptData ,PtData
 from pyqtgraph.Qt import QT_LIB
 print(f"Using PyQtGraph with {QT_LIB}")
 
-TIMER_TIME_OUT = 20 # ms
+TIMER_TIME_OUT = 50 # ms
 AntiAlias = False
 AUTO_UPDATE = True
 
@@ -57,6 +57,7 @@ class PyQtGraphDrawer:
         self.app = QtWidgets.QApplication([])
         # Create main window with proper layout hierarchy
         self.win = QtWidgets.QMainWindow()
+        self.win.closeEvent = self.closeEvent  # 注册关闭事件处理函数
         central_widget = QtWidgets.QWidget()
         self.win.setCentralWidget(central_widget)
 
@@ -137,9 +138,6 @@ class PyQtGraphDrawer:
         # 显示主窗口
         self.win.show()
 
-        # Register QVector<int> type for cross-thread signals
-        #QtCore.qRegisterMetaType('QVector<int>')
-
         # 定时器初始化
         # 定时器
         if AUTO_UPDATE:
@@ -150,6 +148,24 @@ class PyQtGraphDrawer:
             self.timer = None
 
     def update_all(self):
+        # 检测结果表格更新
+        if self.ptData.getData().empty:
+            return
+
+        svm_pred, svm_cfd = self.ptData.getSvmResult()
+        cnn_pred, cnn_cfd = self.ptData.getCnnLstmResult()
+
+        self.prob_table.setItem(0, 0, QTableWidgetItem(svm_pred))
+        self.prob_table.setItem(0, 1, QTableWidgetItem(f"{svm_cfd:.2f}"))
+
+        self.prob_table.setItem(1, 0, QTableWidgetItem(cnn_pred))
+        self.prob_table.setItem(1, 1, QTableWidgetItem(f"{cnn_cfd:.2f}"))
+
+        ###############################################################
+        if self.ptData.times4get > 5:
+            self.ptData.clear()
+            return  #skip update graph
+
         buffer_data = self.dataBuffer.getAll()
         ts = buffer_data['timeStamp']
         
@@ -180,24 +196,18 @@ class PyQtGraphDrawer:
         #height
         self.stats_table.setItem(3, 0, QTableWidgetItem(f"{np.max(buffer_data['height']-np.min(buffer_data['height'])):.2f}"))
 
-        # 检测结果表格更新
-        if self.ptData.getData().empty:
-            return
-                
-        svm_pred, svm_cfd = self.ptData.getSvmResult()
-        cnn_pred, cnn_cfd = self.ptData.getCnnLstmResult()
 
-        self.prob_table.setItem(0, 0, QTableWidgetItem(svm_pred))
-        self.prob_table.setItem(0, 1, QTableWidgetItem(f"{svm_cfd:.2f}"))
-
-        self.prob_table.setItem(1, 0, QTableWidgetItem(cnn_pred))
-        self.prob_table.setItem(1, 1, QTableWidgetItem(f"{cnn_cfd:.2f}"))
-
-
-    def closeEvent(self, event):
+    def closeEvent(self, event):  # 显式绑定关闭事件
+        print(f"PyQtGraphDrawer {self.imAddr} closing")
         self.rFlg.set(False)
+        if self.timer is not None:
+            self.timer.stop()
+            self.timer.deleteLater()
+            self.timer = None
         self.app.quit()
         event.accept()
+        print(f"PyQtGraphDrawer {self.imAddr} closed")
+        
 
 if __name__ == '__main__':
     import threading

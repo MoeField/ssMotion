@@ -12,8 +12,8 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-from modelMake.method_svm import extract_features, MODEL_NAME_SVM
-from modelMake.methodP_cnn_lstm import CNNLSTM, MODEL_NAME_CNNLSTM
+from modelTrainer.method_svm import extract_features, MODEL_NAME_SVM
+from modelTrainer.methodP_cnn_lstm import CNNLSTM, MODEL_NAME_CNNLSTM
 
 class SVMActionPredictor:
     def __init__(self):
@@ -64,7 +64,9 @@ if __name__ == "__main__":
     sPredictor = SVMActionPredictor()
     clPredictor = CnnLstmActionPredictor()
     
-    test_dir = "./trainData"
+    test_dir = "./trainData_badQuality"
+    #test_dir = "./trainData"
+
     for action_name in os.listdir(test_dir):
         action_dir = os.path.join(test_dir, action_name)
         print(f"Testing action: {action_name}")
@@ -74,14 +76,15 @@ if __name__ == "__main__":
                 file_path = os.path.join(action_dir, sample_file)
                 pdData=pd.read_csv(file_path)
                 pred_action = None
+                cfd = 0.0
                 #SVM
-                pred_action, cfd = clPredictor.predict(pdData)
+                pred_action, cfd = sPredictor.predict(pdData)
                 print(
                     "\t "+f"file: {sample_file},"+f"  \tSVM:\t\t{cfd}\t"+
                     f"{'Good' if pred_action==action_name else 'BadPredict:    '+ pred_action}"
                 )
                 #CNN-LSTM
-                pred_action, cfd = sPredictor.predict(pdData)
+                pred_action, cfd = clPredictor.predict(pdData)
                 print(
                     "\t "+f"file: {sample_file},"+f"  \tCNN-LSTM:\t{cfd}\t"+
                     f"{'Good' if pred_action==action_name else 'BadPredict:   '+ pred_action}"

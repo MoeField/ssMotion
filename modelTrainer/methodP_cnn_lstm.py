@@ -14,16 +14,20 @@ RNG = 42 #random.randint(0, 10000)  # 随机种子
 MODEL_NAME_CNNLSTM = "cnn_lstm-m2" # 模型名称
 BATCH_SIZE = 32     # 批量大小
 TRAIN_RATIO = 0.8   # 训练集划分比例
-NUM_EPOCHS = 48     # 训练总周期数
+NUM_EPOCHS = 28     # 训练总周期数
 INIT_LR = 0.001     # 初始学习率
+#EARLY_STOP_PATIENCE = 10 # 早停耐心次数
 
 # 模型参数
-POOL_SIZE = 2
-HIDDEN_SIZE = 256
+POOL_SIZE = 1
+HIDDEN_SIZE = 128
 KENERAL_SIZE = 3
 CONV_CONV = 48
 CONV_LSTM = 64
 LSTM_LSTM = 128
+DROPOUT_C = 0.3
+DROPOUT_L = 0.2
+DROPOUT_F = 0.4
 
 ZERO_DIVISION = 0   # 零除数保护
 
@@ -48,20 +52,31 @@ class SensorDataset(Dataset):
         return self.samples[idx]
 
 class CNNLSTM(nn.Module):
-    def __init__(self, num_classes, input_size=9, hidden_size=HIDDEN_SIZE):
+    def __init__(self, num_classes, input_size=9):
         super().__init__()
         self.cnn = nn.Sequential(
-            nn.Conv1d(input_size, CONV_CONV, kernel_size=KENERAL_SIZE, padding=1),    # 32个通道
+            nn.Conv1d(input_size, CONV_CONV, kernel_size=KENERAL_SIZE, padding=1),  #时序卷积
+            nn.BatchNorm1d(CONV_CONV),  #批标准化
+            nn.ReLU(),                  #激活函数
+            nn.MaxPool1d(POOL_SIZE),    #最大池化
+            nn.Conv1d(CONV_CONV, CONV_LSTM, kernel_size=KENERAL_SIZE, padding=1),    #时序卷积
+            nn.BatchNorm1d(CONV_LSTM),  #批标准化
             nn.ReLU(),
-            nn.MaxPool1d(POOL_SIZE),
-            nn.Conv1d(CONV_CONV, CONV_LSTM, kernel_size=KENERAL_SIZE, padding=1),
-            nn.ReLU(),
-            nn.MaxPool1d(POOL_SIZE)
+            #nn.MaxPool1d(POOL_SIZE),
+            nn.Dropout(DROPOUT_C)             #dropout
         )
-        self.lstm = nn.LSTM(CONV_LSTM, hidden_size, batch_first=True)
-        self.classifier = nn.Sequential(
-            nn.Linear(hidden_size, LSTM_LSTM),
+        self.lstm = nn.LSTM(
+            input_size=CONV_LSTM, 
+            hidden_size=HIDDEN_SIZE, 
+            num_layers=2,
+            batch_first=True,
+            bidirectional=True,
+            dropout=DROPOUT_L
+        )
+        self.classifier = nn.Sequential(    #全连接层
+            nn.Linear(HIDDEN_SIZE, LSTM_LSTM),
             nn.ReLU(),
+            nn.Dropout(DROPOUT_F),
             nn.Linear(LSTM_LSTM, num_classes)
         )
 
@@ -237,8 +252,8 @@ if __name__ == "__main__":
     )
     
     # 创建数据加载器
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=32)
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE)
     
     train_losses , train_accuracies, val_losses, val_accuracies = train_model(
         train_loader, test_loader, num_epochs=NUM_EPOCHS

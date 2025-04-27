@@ -57,6 +57,10 @@ def extract_features(df):
     ]
     
     for col in sensors:
+        #阈值处理
+        if col in ['accX', 'accY', 'accZ', 'gyroX', 'gyroY', 'gyroZ']:
+            df[col] = df[col].apply(lambda x: 0 if abs(x) < 5 else x)# 阈值处理，将绝对值小于0.1的设为0
+
         # 时域特征
         ts = df[col].values
         features += [
@@ -64,7 +68,7 @@ def extract_features(df):
             np.std(ts),         # 标准差
             np.max(ts)-np.min(ts),  # 峰峰值
             np.percentile(ts, 75),  # 75%分位数
-            zero_crossing_rate(ts)  # 过零率
+            #zero_crossing_rate(ts)  # 过零率
         ]
         
         # 频域特征
@@ -82,6 +86,36 @@ def extract_features(df):
         np.std(acc_norm),
         np.max(acc_norm)
     ]
+    
+    # 增加时间窗口滑动特征
+    window_size = 10
+    for col in sensors:
+        rolling_mean = df[col].rolling(window=window_size).mean().dropna()
+        features += [
+            np.mean(rolling_mean),
+            np.std(rolling_mean)
+        ]
+    
+    # 增加差分特征
+    for col in sensors:
+        diffs = np.diff(df[col].values)
+        features += [
+            np.mean(diffs),
+            np.std(diffs)
+        ]
+    
+    # 添加新数据特有的特征处理
+    if 'height' in df.columns:
+        # 新增高度变化率特征
+        height_diff = np.diff(df['height'].values)
+        features += [
+            np.mean(height_diff),
+            np.std(height_diff)
+        ]
+    
+    # 添加运动模式检测
+    acc_std = np.std(df[['accX', 'accY', 'accZ']], axis=0)
+    features += list(acc_std)
     
     return features
 
@@ -110,51 +144,6 @@ def plot_learning_curve(estimator, title, X, y, cv=None, n_jobs=-1):
     plt.grid()
     plt.tight_layout()
     plt.savefig(f"./imgs/学习曲线{title}.png", dpi=300, transparent=True)
-
-"""
-if __name__ == "__main__":
-    # 3. 加载数据
-    X, y = load_data("./trainData")
-
-    # 4. 标签编码
-    le = LabelEncoder()
-    y_encoded = le.fit_transform(y)
-
-    # 5. 创建处理管道
-    pipeline = Pipeline([
-        ('scaler', StandardScaler()),  # 标准化
-        ('svm', SVC(kernel='rbf', probability=True))  # RBF核SVM
-    ])
-
-    # 6. 参数网格搜索（根据数据量调整搜索范围）
-    param_grid = {
-        'svm__C': [0.1, 1, 10], 
-        'svm__gamma': ['scale', 0.1, 0.01]
-    }
-
-    # 7. 训练与评估
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y_encoded, test_size=0.2, stratify=y_encoded, random_state=42
-    )
-
-    # 使用5折交叉验证进行网格搜索
-    grid = GridSearchCV(pipeline, param_grid, cv=5, n_jobs=-1, verbose=1)
-    grid.fit(X_train, y_train)
-
-    # 8. 输出最佳模型结果
-    print(f"Best parameters: {grid.best_params_}")
-    y_pred = grid.predict(X_test)
-    print(classification_report(y_test, y_pred, target_names=le.classes_))
-
-
-
-    # 9. 保存模型
-    from joblib import dump
-    dump(grid.best_estimator_, './models/imu_action_classifier_pipeline.joblib')  # 保存完整的Pipeline
-    dump(le, './models/label_encoder.joblib')  # 单独保存标签编码器
-
-"""
-
 
 
 if __name__ == "__main__":
@@ -186,24 +175,32 @@ if __name__ == "__main__":
     # 步骤4：训练与参数搜索
     # 7. 训练与评估
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y_encoded, test_size=0.2, stratify=y_encoded, random_state=RNG
+        X, y_encoded, test_size=0.2, stratify=y_encoded, random_state=RNG    #
     )
     #print("Data split into training and test sets.")
 
     # 首先进行GridSearchCV找最优参数（保持原代码）
+    # 修改参数网格增加正则化选项
     param_grid = {
-        'svm__C': [0.1, 1, 10],
-        'svm__gamma': ['scale', 'auto'],
-        'svm__kernel': ['rbf']
+        #'svm__C': [0.1, 1, 10],
+        #'svm__gamma': ['scale', 'auto'],
+        #'svm__kernel': ['rbf']
+        'svm__C': [0.01, 0.1, 1, 10],  # 扩大搜索范围
+        'svm__gamma': ['scale', 0.1, 0.01, 0.001],  # 更精细的gamma值
+        'svm__class_weight': ['balanced']  # 处理类别不平衡
     }
     #print("Parameter grid defined.")
 
-    grid_search = GridSearchCV(pipeline, param_grid, cv=5)
-    #print("GridSearchCV initialized.")
+    grid_search = GridSearchCV(
+        pipeline,       # 使用完整的Pipeline
+        param_grid,     # 搜索的参数网格
+        cv=5,           # 5折交叉验证
+        n_jobs=-1,      # 使用所有可用CPU核心
+        verbose=1       # 输出详细信息
+    )
     grid_search.fit(X_train, y_train)
-    #print("GridSearchCV fitted.")
+
     best_model = grid_search.best_estimator_
-    #print("Best model found.")
     gc.collect()
 
     # 阶段一：绘制最佳模型的学习曲线
