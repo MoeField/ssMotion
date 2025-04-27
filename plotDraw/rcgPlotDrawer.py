@@ -11,13 +11,14 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 from dataTypes.roundBuffer import dataType_ImuFrame, RoundBuffer, get_dataBuffer
 from dataTypes.runFlag import get_runFalg
-from src.motionPredictor import SVMActionPredictor, CnnLstmActionPredictor
+from dataTypes.ptData import get_ptData ,PtData
+
 from pyqtgraph.Qt import QT_LIB
 print(f"Using PyQtGraph with {QT_LIB}")
 
 TIMER_TIME_OUT = 20 # ms
 AntiAlias = False
-AUTO_UPDATE=False
+AUTO_UPDATE = True
 
 def calculate_peak(acc_data):
     """计算加速度矢量模量峰值"""
@@ -40,6 +41,7 @@ class PyQtGraphDrawer:
         self.rFlg = get_runFalg(imAddr)
         self.rFlg.set(False)
         self.colors = ['#FF0000', '#00FF00', '#0000FF']
+        self.ptData = get_ptData(imAddr)
 
         # Conditional registration based on Qt binding
         """
@@ -48,9 +50,6 @@ class PyQtGraphDrawer:
         elif QT_LIB == 'PySide':
             QtCore.QMetaType.registerType('QVector<int>')
         """
-
-        self.svmP = SVMActionPredictor()
-        self.cnnLstmP = CnnLstmActionPredictor()
 
     def run(self):
         self.rFlg.set(True)
@@ -150,7 +149,7 @@ class PyQtGraphDrawer:
         else:
             self.timer = None
 
-    def update_all(self,pData:pd.DataFrame=None):
+    def update_all(self):
         buffer_data = self.dataBuffer.getAll()
         ts = buffer_data['timeStamp']
         
@@ -182,13 +181,12 @@ class PyQtGraphDrawer:
         self.stats_table.setItem(3, 0, QTableWidgetItem(f"{np.max(buffer_data['height']-np.min(buffer_data['height'])):.2f}"))
 
         # 检测结果表格更新
-        if pData is None:
+        if self.ptData.getData().empty:
             return
-        else:
-            pass
                 
-        svm_pred, svm_cfd = self.svmP.predict(pData)
-        cnn_pred, cnn_cfd = self.cnnLstmP.predict(pData)
+        svm_pred, svm_cfd = self.ptData.getSvmResult()
+        cnn_pred, cnn_cfd = self.ptData.getCnnLstmResult()
+
         self.prob_table.setItem(0, 0, QTableWidgetItem(svm_pred))
         self.prob_table.setItem(0, 1, QTableWidgetItem(f"{svm_cfd:.2f}"))
 
@@ -204,7 +202,7 @@ class PyQtGraphDrawer:
 if __name__ == '__main__':
     import threading
     import time
-    #AUTO_UPDATE = True
+    AUTO_UPDATE = True
     dataBuffer = get_dataBuffer('test')
     drawer = PyQtGraphDrawer("test")
     
@@ -235,7 +233,8 @@ if __name__ == '__main__':
             # 使用新的push方法
             dataBuffer.push(tframeData)
             time.sleep(0.05)
-            drawer.update_all()
+            #drawer.update_all()
+    
     drawer.run()
     threading.Thread(target=data_generator, daemon=True).start()
 

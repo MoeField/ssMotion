@@ -15,6 +15,7 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 from dataTypes.roundBuffer import get_dataBuffer
+from dataTypes.ptData import get_ptData ,PtData
 from config.conf import *
 
 
@@ -22,7 +23,7 @@ class DataStore:
     def __init__(self, imAddr:str='test', FdrName:str="trainData/test"):
         self.imAddr = imAddr
         self.dataRoundBuffer = get_dataBuffer(imAddr)
-        self.saveFxCall=[]
+        self.ptData = get_ptData(imAddr)
 
         self.FdrName = FdrName
         folder_path = Path(self.FdrName)  # 替换为你的文件夹路径
@@ -90,11 +91,7 @@ class DataStore:
             "angleY": dataBuffer["angle"]['Y'],
             "height": dataBuffer["height"]
         })
-        for fx in self.saveFxCall:
-            try:
-                fx(df)
-            except Exception as e:
-                print(f"error in {fx.__name__}: {e}")
+        self.ptData.update(df) # 更新ptData
         df.to_csv(f"./{self.FdrName}/{filename}.csv", index=False)
         
 
