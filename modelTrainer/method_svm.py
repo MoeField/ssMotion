@@ -2,6 +2,7 @@ import os
 import gc
 import numpy as np
 import pandas as pd
+from sklearn.decomposition import PCA
 from sklearn.svm import SVC
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import train_test_split, GridSearchCV
@@ -66,7 +67,7 @@ def extract_features(df):
         features += [
             np.mean(ts),        # 平均值
             np.std(ts),         # 标准差
-            np.max(ts)-np.min(ts),  # 峰峰值
+            #np.max(ts)-np.min(ts),  # 极差
             np.percentile(ts, 75),  # 75%分位数
             #zero_crossing_rate(ts)  # 过零率
         ]
@@ -117,6 +118,13 @@ def extract_features(df):
     acc_std = np.std(df[['accX', 'accY', 'accZ']], axis=0)
     features += list(acc_std)
     
+    # 移除低频能量比等冗余特征
+    # 增加特征相关性阈值（相关系数>0.7的特征自动合并）
+    corr_threshold = 0.7
+    sensor_corr = df[sensors].corr().abs()
+    upper = sensor_corr.where(np.triu(np.ones(sensor_corr.shape), k=1).astype(bool))
+    to_drop = [column for column in upper.columns if any(upper[column] > corr_threshold)]
+    
     return features
 
 def zero_crossing_rate(signal):
@@ -125,8 +133,11 @@ def zero_crossing_rate(signal):
 
 ###################################################################
 import matplotlib
-matplotlib.use('Agg')  # 使用非GUI后端
 import matplotlib.pyplot as plt
+matplotlib.use('Agg')  # 使用非GUI后端
+# 新增字体配置
+plt.rcParams['font.sans-serif'] = ['Songti SC']  # 设置黑体 
+plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
 from sklearn.model_selection import LearningCurveDisplay
 # 绘制学习曲线
 def plot_learning_curve(estimator, title, X, y, cv=None, n_jobs=-1):
@@ -145,6 +156,27 @@ def plot_learning_curve(estimator, title, X, y, cv=None, n_jobs=-1):
     plt.tight_layout()
     plt.savefig(f"./imgs/学习曲线{title}.png", dpi=300, transparent=True)
 
+# 在模型评估阶段添加
+from sklearn.calibration import calibration_curve
+
+# 修改校准曲线绘制逻辑
+def plot_calibration_curve(y_true, y_prob, classes):
+    plt.figure(figsize=(12, 8))
+    for i in range(len(classes)):
+        prob_true, prob_pred = calibration_curve(
+            (y_true == i).astype(int), 
+            y_prob[:, i],
+            n_bins=10
+        )
+        plt.plot(prob_pred, prob_true, marker='o', label=classes[i])
+    
+    plt.plot([0, 1], [0, 1], linestyle='--', color='gray')
+    plt.xlabel("Predicted probability")
+    plt.ylabel("True probability")
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.title("Calibration Curve (OvR)")
+    plt.savefig("./imgs/calibration_curve.png", bbox_inches='tight')
+    plt.close()
 
 if __name__ == "__main__":
     from sklearn.model_selection import GridSearchCV
@@ -166,9 +198,11 @@ if __name__ == "__main__":
     #print("Labels encoded successfully.")
 
     # 步骤3：创建处理管道
+    # 修改处理管道
     pipeline = Pipeline([
-        ('scaler', StandardScaler()),  # 标准化
-        ('svm', SVC(kernel='rbf', probability=True))  # RBF核SVM
+        ('scaler', StandardScaler()),
+        ('pca', PCA(n_components=0.95)),  # 保留95%方差
+        ('svm', SVC(kernel='rbf', probability=True))
     ])
     #print("Pipeline created successfully.")
 
@@ -181,6 +215,7 @@ if __name__ == "__main__":
 
     # 首先进行GridSearchCV找最优参数（保持原代码）
     # 修改参数网格增加正则化选项
+    """
     param_grid = {
         #'svm__C': [0.1, 1, 10],
         #'svm__gamma': ['scale', 'auto'],
@@ -190,6 +225,15 @@ if __name__ == "__main__":
         'svm__class_weight': ['balanced']  # 处理类别不平衡
     }
     #print("Parameter grid defined.")
+    """
+    param_grid = {
+    'svm__C': np.logspace(-3, 1, 5),  # 缩小搜索范围 [0.001, 0.01, 0.1, 1, 10]
+    'svm__gamma': np.concatenate((np.logspace(-3, 0, 4), [0.5])),  # 减少离散值
+    'svm__class_weight': ['balanced'],
+    'svm__kernel': ['rbf'], # 'poly'],  # 增加核函数选择
+    #'svm__max_iter': [10000]  # 确保收敛
+    'svm__shrinking': [True, False]  # 新增正则化选项
+}
 
     grid_search = GridSearchCV(
         pipeline,       # 使用完整的Pipeline
@@ -210,10 +254,21 @@ if __name__ == "__main__":
     # 输出最终分类报告
     y_pred = best_model.predict(X_test)
     print(classification_report(y_test, y_pred, target_names=le.classes_))
+    # 在模型预测后调用时传入类别标签
+    y_prob = best_model.predict_proba(X_test)  # 获取概率预测
+    plot_calibration_curve(y_test, y_prob, le.classes_)
 
     # 步骤5：保存模型
     from joblib import dump
     dump(best_model, f'./models/{MODEL_NAME_SVM}_pipeline.joblib')  # 保存完整的Pipeline
     dump(le, f'./models/{MODEL_NAME_SVM}_label_encoder.joblib')  # 单独保存标签编码器
     print("Models saved successfully.")
+    # 新增嵌套交叉验证
+    from sklearn.model_selection import cross_val_score
+    from sklearn.model_selection import StratifiedKFold
+    nested_scores = cross_val_score(
+        grid_search, X_train, y_train, 
+        cv=StratifiedKFold(n_splits=3),
+        scoring='balanced_accuracy')
+    print(f"Nested CV Score: {np.mean(nested_scores):.3f} ± {np.std(nested_scores):.3f}")
 
